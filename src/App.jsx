@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { subscribeState, saveState } from "./firebase";
+import { subscribeState, saveState, onAuthChange, loginWithGoogle, handleRedirectResult, logout } from "./firebase";
 
 // ─── Local Storage ────────────────────────────────────────────────────────────
 const STORAGE_KEY = "casal_finance_v1";
@@ -123,6 +123,46 @@ function BarChart({ userA, userB, users }) {
   );
 }
 
+// ─── Styles (module-level) ────────────────────────────────────────────────────
+const styles = {
+  root: { minHeight: "100vh", fontFamily: "'DM Sans', 'Nunito', system-ui, sans-serif", maxWidth: 480, margin: "0 auto", position: "relative" },
+  light: { "--bg": "#F7F8FC", "--card-bg": "#FFFFFF", "--fg": "#111827", "--fg-muted": "#6B7280", "--border": "#E5E7EB", "--accent": "#4D96FF", "--accent-bg": "#EFF6FF" },
+  dark: { "--bg": "#0F1117", "--card-bg": "#1A1D27", "--fg": "#F3F4F6", "--fg-muted": "#9CA3AF", "--border": "#2D3148", "--accent": "#60A5FA", "--accent-bg": "#1E2A42" },
+  onboard: { minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 },
+  header: { position: "sticky", top: 0, zIndex: 100, background: "var(--bg)", borderBottom: "1px solid var(--border)", padding: "14px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" },
+  main: { background: "var(--bg)", minHeight: "calc(100vh - 120px)", paddingBottom: 100 },
+  page: { display: "flex", flexDirection: "column", gap: 14, padding: "16px 16px 24px" },
+  nav: { position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, background: "var(--bg)", borderTop: "1px solid var(--border)", display: "flex", zIndex: 100 },
+  navBtn: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "10px 0", background: "none", border: "none", cursor: "pointer", color: "var(--fg-muted)", transition: "color .2s" },
+  navBtnActive: { color: "var(--accent)" },
+  fab: { width: 56, height: 56, borderRadius: "50%", background: "var(--accent)", color: "#fff", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 6px 28px rgba(77,150,255,.5)" },
+  card: { background: "var(--card-bg)", borderRadius: 18, padding: "18px 16px", border: "1px solid var(--border)" },
+  cardTitle: { fontWeight: 800, fontSize: 14, color: "var(--fg)", marginBottom: 14, letterSpacing: "-0.3px" },
+  input: { width: "100%", background: "var(--card-bg)", border: "1.5px solid var(--border)", borderRadius: 12, padding: "11px 14px", fontSize: 15, color: "var(--fg)", outline: "none", fontFamily: "inherit", boxSizing: "border-box" },
+  inputGroup: { display: "flex", flexDirection: "column", gap: 6 },
+  label: { fontSize: 12, fontWeight: 700, color: "var(--fg-muted)", textTransform: "uppercase", letterSpacing: "0.5px" },
+  btn: { width: "100%", background: "var(--accent)", color: "#fff", border: "none", borderRadius: 14, padding: "14px", fontSize: 15, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: "inherit" },
+  iconBtn: { background: "none", border: "none", cursor: "pointer", color: "var(--fg)", padding: 6, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" },
+  chip: { padding: "6px 12px", borderRadius: 20, fontSize: 12, fontWeight: 700, cursor: "pointer", background: "var(--bg)", border: "1.5px solid var(--border)", color: "var(--fg-muted)", fontFamily: "inherit" },
+  chipActive: { background: "var(--accent)", borderColor: "var(--accent)", color: "#fff" },
+  toggleBtn: { padding: "10px", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer", background: "var(--bg)", border: "1.5px solid var(--border)", color: "var(--fg-muted)", fontFamily: "inherit" },
+  toggleBtnActive: { background: "var(--accent)", borderColor: "var(--accent)", color: "#fff" },
+  divider: { height: 1, background: "var(--border)", margin: "2px 0" },
+};
+
+const css = `
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); }
+  input[type=date]::-webkit-calendar-picker-indicator,
+  input[type=month]::-webkit-calendar-picker-indicator { filter: invert(50%); cursor: pointer; }
+  select option { background: #1A1D27; color: #F3F4F6; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes pulse { 0%,100% { box-shadow: 0 6px 28px rgba(77,150,255,.5); } 50% { box-shadow: 0 6px 36px rgba(77,150,255,.85); } }
+  .fab-pulse { animation: pulse 2.5s ease-in-out infinite; }
+  ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700;900&display=swap');
+`;
+
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [state, setState] = useState(() => loadLocal() || DEFAULT_STATE);
@@ -137,11 +177,25 @@ export default function App() {
   const [editNames, setEditNames] = useState(false);
   const [nameA, setNameA] = useState(state.users[0].name);
   const [nameB, setNameB] = useState(state.users[1].name);
-  const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
 
-  // ── Firebase sync (non-blocking) ──────────────────────────────────────────
+  // ── Auth state ────────────────────────────────────────────────────────────
+  const [user, setUser] = useState(undefined); // undefined = ainda verificando
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginError, setLoginError] = useState("");
+
   useEffect(() => {
-    // Start with local data immediately
+    // Verifica resultado de redirect (mobile)
+    handleRedirectResult().catch(() => {});
+    // Escuta mudanças de autenticação
+    const unsub = onAuthChange((u) => setUser(u));
+    return unsub;
+  }, []);
+
+  // ── Firebase sync (só roda quando logado) ────────────────────────────────
+  useEffect(() => {
+    if (!user) return; // não sincroniza sem login
+
     const localData = loadLocal();
     if (localData) {
       setState(localData);
@@ -149,27 +203,30 @@ export default function App() {
       setNameB(localData.users[1].name);
     }
 
-    // Firebase sync in background - don't block UI
-    const unsub = subscribeState((firebaseState) => {
-      if (firebaseState && firebaseState.transactions !== undefined) {
-        const merged = {
-          users: firebaseState.users || DEFAULT_STATE.users,
-          transactions: firebaseState.transactions || [],
-          onboarded: firebaseState.onboarded ?? false,
-        };
-        setState(merged);
-        saveLocal(merged);
-        setNameA(merged.users[0].name);
-        setNameB(merged.users[1].name);
-      }
-      setLoading(false);
-    });
-
-    // Fallback: if Firebase doesn't respond in 3s, show local data
-    const timeout = setTimeout(() => setLoading(false), 3000);
-
+    setSyncing(true);
+    let unsub = () => {};
+    try {
+      unsub = subscribeState((firebaseState) => {
+        if (firebaseState && firebaseState.transactions !== undefined) {
+          const merged = {
+            users: firebaseState.users || DEFAULT_STATE.users,
+            transactions: firebaseState.transactions || [],
+            onboarded: firebaseState.onboarded ?? false,
+          };
+          setState(merged);
+          saveLocal(merged);
+          setNameA(merged.users[0].name);
+          setNameB(merged.users[1].name);
+        }
+        setSyncing(false);
+      });
+    } catch (err) {
+      console.error("Firebase error:", err);
+      setSyncing(false);
+    }
+    const timeout = setTimeout(() => setSyncing(false), 5000);
     return () => { unsub(); clearTimeout(timeout); };
-  }, []);
+  }, [user]);
 
   const update = useCallback((fn) => {
     setState(prev => {
@@ -188,19 +245,14 @@ export default function App() {
   // ── Computed balance ─────────────────────────────────────────────────────
   const balance = useMemo(() => {
     let balA = 0;
-    // balA positivo = B deve para A
-    // balA negativo = A deve para B
     state.transactions.forEach(t => {
       if (t.type === "transfer") {
-        // Quem transfere está pagando sua dívida:
-        // B transfere para A → B está pagando → balA diminui (B deve menos)
-        // A transfere para B → A está pagando → balA aumenta (A deve menos)
-        if (t.from === "B") balA -= t.value;
+        if (t.from === "A") balA -= t.value;
         else balA += t.value;
       } else if (t.type === "shared") {
         const half = t.value / 2;
-        if (t.paidBy === "A") balA += half; // A pagou mais → B deve para A
-        else balA -= half;                   // B pagou mais → A deve para B
+        if (t.paidBy === "A") balA += half;
+        else balA -= half;
       }
     });
     return balA;
@@ -306,53 +358,59 @@ export default function App() {
     showToast("CSV exportado!");
   };
 
-  const styles = {
-    root: { minHeight: "100vh", fontFamily: "'DM Sans', 'Nunito', system-ui, sans-serif", maxWidth: 480, margin: "0 auto", position: "relative" },
-    light: { "--bg": "#F7F8FC", "--card-bg": "#FFFFFF", "--fg": "#111827", "--fg-muted": "#6B7280", "--border": "#E5E7EB", "--accent": "#4D96FF", "--accent-bg": "#EFF6FF" },
-    dark: { "--bg": "#0F1117", "--card-bg": "#1A1D27", "--fg": "#F3F4F6", "--fg-muted": "#9CA3AF", "--border": "#2D3148", "--accent": "#60A5FA", "--accent-bg": "#1E2A42" },
-    onboard: { minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 },
-    header: { position: "sticky", top: 0, zIndex: 100, background: "var(--bg)", borderBottom: "1px solid var(--border)", padding: "14px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" },
-    main: { background: "var(--bg)", minHeight: "calc(100vh - 120px)", paddingBottom: 100 },
-    page: { display: "flex", flexDirection: "column", gap: 14, padding: "16px 16px 24px" },
-    nav: { position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, background: "var(--bg)", borderTop: "1px solid var(--border)", display: "flex", zIndex: 100 },
-    navBtn: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "10px 0", background: "none", border: "none", cursor: "pointer", color: "var(--fg-muted)", transition: "color .2s" },
-    navBtnActive: { color: "var(--accent)" },
-    fab: { width: 56, height: 56, borderRadius: "50%", background: "var(--accent)", color: "#fff", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 6px 28px rgba(77,150,255,.5)" },
-    card: { background: "var(--card-bg)", borderRadius: 18, padding: "18px 16px", border: "1px solid var(--border)" },
-    cardTitle: { fontWeight: 800, fontSize: 14, color: "var(--fg)", marginBottom: 14, letterSpacing: "-0.3px" },
-    input: { width: "100%", background: "var(--card-bg)", border: "1.5px solid var(--border)", borderRadius: 12, padding: "11px 14px", fontSize: 15, color: "var(--fg)", outline: "none", fontFamily: "inherit", boxSizing: "border-box" },
-    inputGroup: { display: "flex", flexDirection: "column", gap: 6 },
-    label: { fontSize: 12, fontWeight: 700, color: "var(--fg-muted)", textTransform: "uppercase", letterSpacing: "0.5px" },
-    btn: { width: "100%", background: "var(--accent)", color: "#fff", border: "none", borderRadius: 14, padding: "14px", fontSize: 15, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: "inherit" },
-    iconBtn: { background: "none", border: "none", cursor: "pointer", color: "var(--fg)", padding: 6, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" },
-    chip: { padding: "6px 12px", borderRadius: 20, fontSize: 12, fontWeight: 700, cursor: "pointer", background: "var(--bg)", border: "1.5px solid var(--border)", color: "var(--fg-muted)", fontFamily: "inherit" },
-    chipActive: { background: "var(--accent)", borderColor: "var(--accent)", color: "#fff" },
-    toggleBtn: { padding: "10px", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer", background: "var(--bg)", border: "1.5px solid var(--border)", color: "var(--fg-muted)", fontFamily: "inherit" },
-    toggleBtnActive: { background: "var(--accent)", borderColor: "var(--accent)", color: "#fff" },
-    divider: { height: 1, background: "var(--border)", margin: "2px 0" },
-  };
-
-  const css = `
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: var(--bg); }
-    input[type=date]::-webkit-calendar-picker-indicator,
-    input[type=month]::-webkit-calendar-picker-indicator { filter: invert(50%); cursor: pointer; }
-    select option { background: #1A1D27; color: #F3F4F6; }
-    @keyframes pulse { 0%,100% { box-shadow: 0 6px 28px rgba(77,150,255,.5); } 50% { box-shadow: 0 6px 36px rgba(77,150,255,.85); } }
-    .fab-pulse { animation: pulse 2.5s ease-in-out infinite; }
-    ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
-    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700;900&display=swap');
-  `;
-
   const theme = dark ? styles.dark : styles.light;
 
-  if (loading) {
+  // ── Verificando auth (splash rápido) ──────────────────────────────────────
+  if (user === undefined) {
     return (
-      <div style={{ ...styles.root, ...theme, display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
+      <div style={{ ...styles.root, ...styles.light, display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
         <div style={{ textAlign: "center" }}>
-          <div style={{ width: 40, height: 40, border: "3px solid var(--border)", borderTopColor: "var(--accent)", borderRadius: "50%", animation: "spin 1s linear infinite", margin: "0 auto 12px" }} />
+          <div style={{ fontSize: 48, marginBottom: 16 }}>💑</div>
+          <div style={{ width: 32, height: 32, border: "3px solid #E5E7EB", borderTopColor: "#4D96FF", borderRadius: "50%", animation: "spin 1s linear infinite", margin: "0 auto" }} />
           <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-          <p style={{ color: "var(--fg-muted)", fontSize: 14 }}>Sincronizando...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Tela de login ─────────────────────────────────────────────────────────
+  if (!user) {
+    return (
+      <div style={{ ...styles.root, ...(dark ? styles.dark : styles.light), display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: 24 }}>
+        <style>{css}</style>
+        <div style={{ width: "100%", maxWidth: 360, textAlign: "center" }}>
+          <div style={{ fontSize: 64, marginBottom: 16 }}>💑</div>
+          <h1 style={{ fontWeight: 900, fontSize: 30, color: "var(--fg)", letterSpacing: "-1px", marginBottom: 8 }}>CasalFinance</h1>
+          <p style={{ color: "var(--fg-muted)", fontSize: 15, marginBottom: 40 }}>Controle financeiro para dois 💸</p>
+          <button
+            onClick={async () => {
+              setLoginLoading(true);
+              setLoginError("");
+              try { await loginWithGoogle(); }
+              catch (e) { setLoginError("Não foi possível fazer login. Tente novamente."); }
+              finally { setLoginLoading(false); }
+            }}
+            disabled={loginLoading}
+            style={{ ...styles.btn, background: "#fff", color: "#1F1F1F", border: "1.5px solid #E5E7EB", boxShadow: "0 2px 12px rgba(0,0,0,.1)", gap: 12, fontSize: 15 }}
+          >
+            {loginLoading ? (
+              <div style={{ width: 20, height: 20, border: "2px solid #ccc", borderTopColor: "#4D96FF", borderRadius: "50%", animation: "spin 1s linear infinite" }} />
+            ) : (
+              <svg width="20" height="20" viewBox="0 0 48 48">
+                <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+                <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+                <path fill="#FBBC05" d="M10.53 28.59c-.48-1.48-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+                <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.35-8.16 2.35-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+              </svg>
+            )}
+            {loginLoading ? "Entrando..." : "Entrar com Google"}
+          </button>
+          {loginError && (
+            <p style={{ color: "#FF6B6B", fontSize: 13, marginTop: 16, fontWeight: 600 }}>{loginError}</p>
+          )}
+          <p style={{ color: "var(--fg-muted)", fontSize: 12, marginTop: 32, lineHeight: 1.6 }}>
+            Qualquer conta Google logada acessa<br />os dados compartilhados do casal.
+          </p>
         </div>
       </div>
     );
@@ -393,13 +451,33 @@ export default function App() {
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 22 }}>💰</span>
           <span style={{ fontWeight: 900, fontSize: 18, color: "var(--fg)", letterSpacing: "-0.5px" }}>CasalFinance</span>
+          {syncing && (
+            <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <div style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--accent)", animation: "pulse-dot 1.2s ease-in-out infinite" }} />
+              <style>{`@keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:.3} }`}</style>
+              <span style={{ fontSize: 11, color: "var(--fg-muted)" }}>sync</span>
+            </div>
+          )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button onClick={() => setDark(d => !d)} style={{ ...styles.iconBtn, padding: 8 }}>
-            {dark ? <Icons.Sun size={18} /> : <Icons.Moon size={18} />}
+            {dark ? <Icons.Sun size={18}/> : <Icons.Moon size={18}/>}
           </button>
           <button onClick={() => setModal("settings")} style={styles.iconBtn}>
-            <Icons.Settings size={18} />
+            <Icons.Settings size={18}/>
+          </button>
+          {/* Avatar + logout */}
+          <button
+            onClick={() => { if (window.confirm("Sair da conta?")) logout(); }}
+            style={{ ...styles.iconBtn, padding: 0 }}
+            title={user?.email}
+          >
+            {user?.photoURL
+              ? <img src={user.photoURL} alt="avatar" style={{ width: 30, height: 30, borderRadius: "50%", border: "2px solid var(--border)" }} />
+              : <div style={{ width: 30, height: 30, borderRadius: "50%", background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, color: "#fff", fontWeight: 700 }}>
+                  {user?.displayName?.[0] || "?"}
+                </div>
+            }
           </button>
         </div>
       </div>
@@ -505,7 +583,7 @@ export default function App() {
               </div>
             )}
             <button onClick={exportCSV} style={{ ...styles.btn, background: "transparent", color: "var(--fg-muted)", border: "1.5px solid var(--border)", display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}>
-              <Icons.Download size={16} /> Exportar CSV
+              <Icons.Download size={16}/> Exportar CSV
             </button>
           </div>
         )}
@@ -514,7 +592,6 @@ export default function App() {
         {tab === "stats" && (
           <div style={styles.page}>
             <p style={{ fontWeight: 900, fontSize: 20, color: "var(--fg)", letterSpacing: "-0.5px" }}>Estatísticas</p>
-
             <div style={styles.card}>
               <p style={styles.cardTitle}>Gastos por mês (últimos 6)</p>
               <BarChart userA={barDataA} userB={barDataB} users={state.users} />
@@ -565,26 +642,26 @@ export default function App() {
       {/* ── BOTTOM NAV ─────────────────────────────────────────── */}
       <nav style={styles.nav}>
         <button onClick={() => setTab("home")} style={{ ...styles.navBtn, ...(tab === "home" ? styles.navBtnActive : {}) }}>
-          <Icons.Home size={22} />
+          <Icons.Home size={22}/>
           <span style={{ fontSize: 10, marginTop: 2 }}>Início</span>
         </button>
         <button onClick={() => setTab("history")} style={{ ...styles.navBtn, ...(tab === "history" ? styles.navBtnActive : {}) }}>
-          <Icons.List size={22} />
+          <Icons.List size={22}/>
           <span style={{ fontSize: 10, marginTop: 2 }}>Histórico</span>
         </button>
         <button onClick={() => setTab("stats")} style={{ ...styles.navBtn, ...(tab === "stats" ? styles.navBtnActive : {}) }}>
-          <Icons.Chart size={22} />
+          <Icons.Chart size={22}/>
           <span style={{ fontSize: 10, marginTop: 2 }}>Estatísticas</span>
         </button>
         <button onClick={() => setModal("settings")} style={{ ...styles.navBtn, ...(tab === "settings" ? styles.navBtnActive : {}) }}>
-          <Icons.Settings size={22} />
+          <Icons.Settings size={22}/>
           <span style={{ fontSize: 10, marginTop: 2 }}>Ajustes</span>
         </button>
       </nav>
 
       {/* ── FAB ────────────────────────────────────────────────── */}
       <button className="fab-pulse" onClick={() => setModal("expense")} style={{ ...styles.fab, position: "fixed", bottom: 90, right: 20 }}>
-        <Icons.Plus size={24} />
+        <Icons.Plus size={24}/>
       </button>
 
       {/* ── EXPENSE MODAL ──────────────────────────────────────── */}
@@ -639,7 +716,7 @@ export default function App() {
                 ))}
               </div>
             </div>
-            <button onClick={addExpense} style={styles.btn}><Icons.Check size={16} /> Adicionar</button>
+            <button onClick={addExpense} style={styles.btn}><Icons.Check size={16}/> Adicionar</button>
           </div>
         </Modal>
       )}
@@ -684,7 +761,7 @@ export default function App() {
               <input style={styles.input} placeholder="Ex: Acerto do mês" value={transferForm.desc}
                 onChange={e => setTransferForm(f => ({ ...f, desc: e.target.value }))} />
             </div>
-            <button onClick={addTransfer} style={styles.btn}><Icons.Check size={16} /> Confirmar Acerto</button>
+            <button onClick={addTransfer} style={styles.btn}><Icons.Check size={16}/> Confirmar Acerto</button>
           </div>
         </Modal>
       )}
@@ -700,17 +777,17 @@ export default function App() {
                 <input style={{ ...styles.input, flex: 1 }} value={f.val} onChange={e => f.set(e.target.value)} />
               </div>
             ))}
-            <button onClick={saveNames} style={styles.btn}><Icons.Check size={16} /> Salvar nomes</button>
+            <button onClick={saveNames} style={styles.btn}><Icons.Check size={16}/> Salvar nomes</button>
             <div style={styles.divider} />
             <button onClick={() => setModal("transfer")} style={{ ...styles.btn, background: "#4D96FF22", color: "#4D96FF", border: "1.5px solid #4D96FF44" }}>
-              <Icons.Transfer size={16} /> Fazer acerto
+              <Icons.Transfer size={16}/> Fazer acerto
             </button>
             <button onClick={exportCSV} style={{ ...styles.btn, background: "transparent", color: "var(--fg)", border: "1.5px solid var(--border)", display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}>
-              <Icons.Download size={16} /> Exportar CSV
+              <Icons.Download size={16}/> Exportar CSV
             </button>
             <button onClick={() => { if (confirm("Apagar TODOS os dados? Esta ação não pode ser desfeita.")) { update(() => ({ ...DEFAULT_STATE, onboarded: true, users: state.users })); setModal(null); showToast("Dados apagados"); } }}
               style={{ ...styles.btn, background: "#FF6B6B22", color: "#FF6B6B", border: "1.5px solid #FF6B6B44", display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}>
-              <Icons.Trash size={16} /> Apagar todos os dados
+              <Icons.Trash size={16}/> Apagar todos os dados
             </button>
           </div>
         </Modal>
@@ -732,7 +809,6 @@ function TxRow({ t, users, onDelete }) {
   const payer = users.find(u => u.id === t.paidBy) || users[0];
   const cat = CAT_MAP[t.category] || { emoji: "📦", label: "Outros" };
   const isTransfer = t.type === "transfer";
-
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0" }}>
       <div style={{ width: 40, height: 40, borderRadius: 12, background: isTransfer ? "#4D96FF22" : payer.color + "22", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>
@@ -751,11 +827,11 @@ function TxRow({ t, users, onDelete }) {
       </div>
       {confirm ? (
         <div style={{ display: "flex", gap: 4 }}>
-          <button onClick={() => onDelete(t.id)} style={{ ...styles.iconBtn, color: "#FF6B6B" }}><Icons.Check size={16} /></button>
-          <button onClick={() => setConfirm(false)} style={styles.iconBtn}><Icons.X size={16} /></button>
+          <button onClick={() => onDelete(t.id)} style={{ ...styles.iconBtn, color: "#FF6B6B" }}><Icons.Check size={16}/></button>
+          <button onClick={() => setConfirm(false)} style={styles.iconBtn}><Icons.X size={16}/></button>
         </div>
       ) : (
-        <button onClick={() => setConfirm(true)} style={{ ...styles.iconBtn, color: "var(--fg-muted)" }}><Icons.Trash size={15} /></button>
+        <button onClick={() => setConfirm(true)} style={{ ...styles.iconBtn, color: "var(--fg-muted)" }}><Icons.Trash size={15}/></button>
       )}
     </div>
   );
@@ -769,7 +845,7 @@ function Modal({ title, onClose, children }) {
         onClick={e => e.stopPropagation()}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
           <h2 style={{ fontWeight: 900, fontSize: 20, color: "var(--fg)", letterSpacing: "-0.5px" }}>{title}</h2>
-          <button onClick={onClose} style={styles.iconBtn}><Icons.X size={20} /></button>
+          <button onClick={onClose} style={styles.iconBtn}><Icons.X size={20}/></button>
         </div>
         {children}
       </div>
