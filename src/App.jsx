@@ -243,20 +243,59 @@ export default function App() {
   };
 
   // ── Computed balance ─────────────────────────────────────────────────────
-  const balance = useMemo(() => {
-    let balA = 0;
+  const balances = useMemo(() => {
+    const result = { A: 0, B: 0 };
+
     state.transactions.forEach(t => {
+      // TRANSFERÊNCIA
       if (t.type === "transfer") {
-        if (t.from === "A") balA -= t.value;
-        else balA += t.value;
-      } else if (t.type === "shared") {
-        const half = t.value / 2;
-        if (t.paidBy === "A") balA += half;
-        else balA -= half;
+        result[t.from] -= t.value;
+        result[t.to] += t.value;
+        return;
+      }
+
+      // DESPESA INDIVIDUAL
+      if (t.type === "individual") {
+        result[t.paidBy] -= t.value;
+        return;
+      }
+
+      // DESPESA COMPARTILHADA
+      if (t.type === "shared") {
+        const participants = t.participants || ["A", "B"];
+        const splitType = t.split_type || "equal";
+        const splitValues = t.split_values || {};
+
+        let shares = {};
+
+        if (splitType === "equal") {
+          const value = t.value / participants.length;
+          participants.forEach(p => (shares[p] = value));
+        }
+
+        if (splitType === "exact") {
+          shares = splitValues;
+        }
+
+        if (splitType === "percentage") {
+          participants.forEach(p => {
+            shares[p] = t.value * (splitValues[p] / 100);
+          });
+        }
+
+        participants.forEach(p => {
+          result[p] -= shares[p];
+        });
+
+        result[t.paidBy] += t.value;
       }
     });
-    return balA;
+
+    return result;
   }, [state.transactions]);
+
+  // compatibilidade com o resto do app
+  const balance = balances["A"] || 0;
 
   // ── Monthly stats ────────────────────────────────────────────────────────
   const monthlyTx = useMemo(() =>
@@ -313,7 +352,7 @@ export default function App() {
   const addExpense = () => {
     const val = parseFloat(form.value.replace(",", "."));
     if (!val || val <= 0 || !form.desc.trim()) { showToast("Preencha todos os campos", false); return; }
-    const tx = { id: Date.now(), ...form, value: val, date: form.date };
+    const tx = { id: Date.now(), ...form, value: val, date: form.date, participants: ["A", "B"] };
     update(s => ({ ...s, transactions: [...s.transactions, tx] }));
     setForm({ value: "", desc: "", date: today(), paidBy: "A", type: "shared", category: "outros" });
     setModal(null);
@@ -397,7 +436,7 @@ export default function App() {
               <div style={{ width: 20, height: 20, border: "2px solid #ccc", borderTopColor: "#4D96FF", borderRadius: "50%", animation: "spin 1s linear infinite" }} />
             ) : (
               <svg width="20" height="20" viewBox="0 0 48 48">
-                <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+                <path fill="#EA4335" d="M24 9.5c-.48-1.48-.76-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
                 <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
                 <path fill="#FBBC05" d="M10.53 28.59c-.48-1.48-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
                 <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.35-8.16 2.35-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
