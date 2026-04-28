@@ -32,17 +32,35 @@ try {
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
+const ALLOWED_EMAILS = [
+  "maferrazjr999@gmail.com",
+  "ghisleinebernardon@gmail.com"
+];
+
+export function isEmailAllowed(email) {
+  if (!email) return false;
+  return ALLOWED_EMAILS.some(e => e.toLowerCase() === email.toLowerCase());
+}
+
 const provider = new GoogleAuthProvider();
 
 export function onAuthChange(callback) {
   if (!auth) return () => {};
-  return onAuthStateChanged(auth, callback);
+  return onAuthStateChanged(auth, (user) => {
+    if (user && !isEmailAllowed(user.email)) {
+      callback(null);
+      logout().then(() => {
+        alert("Acesso não autorizado. Este app é apenas para usuários cadastrados.");
+      });
+      return;
+    }
+    callback(user);
+  });
 }
 
 export async function loginWithGoogle() {
   if (!auth) return;
   try {
-    // Tenta popup primeiro (desktop), cai para redirect (mobile/Brave)
     await signInWithPopup(auth, provider);
   } catch (err) {
     if (
