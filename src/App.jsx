@@ -60,7 +60,7 @@ const Icons = {
   Home: (p) => <Icon {...p} d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z M9 22V12h6v10" />,
   List: (p) => <Icon {...p} d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />,
   Chart: (p) => <Icon {...p} d="M18 20V10M12 20V4M6 20v-6" />,
-  Settings: (p) => <Icon {...p} d="M12 15a3 3 0 100-6 3 3 0 000 6z M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 012.83-2.83l-.06-.06A1.65 1.65 0 0021 10.6V9.4a1.65 1.65 0 00-1.18-1.58l-.06-.06a2 2 0 00-2.83 2.83l.06.06A1.65 1.65 0 0015 12H9a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 00-2.83-2.83l.06.06A1.65 1.65 0 004.6 9.4v1.2A1.65 1.65 0 006.18 12.18l.06.06a2 2 0 002.83-2.83l-.06-.06A1.65 1.65 0 009 8V7" />,
+  Settings: (p) => <Icon {...p} d="M12 15a3 3 0 100-6 3 3 0 000 6z M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 012.83-2.83l-.06-.06A1.65 1.65 0 0021 10.6V9.4a1.65 1.65 0 00-1.18-1.58l-.06-.06a2 2 0 00-2.83 2.83l.06.06A1.65 1.65 0 0015 8V7" />,
   X: (p) => <Icon {...p} d="M18 6L6 18M6 6l12 12" />,
   Check: (p) => <Icon {...p} d="M20 6L9 17l-5-5" />,
   ArrowRight: (p) => <Icon {...p} d="M5 12h14M12 5l7 7-7 7" />,
@@ -247,13 +247,14 @@ export default function App() {
     let balA = 0;
     state.transactions.forEach(t => {
       if (t.type === "transfer") {
-        if (t.from === "A") balA -= t.value;
-        else balA += t.value;
+        if (t.from === "A") balA += t.value;
+        else balA -= t.value;
       } else if (t.type === "shared") {
         const half = t.value / 2;
         if (t.paidBy === "A") balA += half;
         else balA -= half;
       }
+      // individual: doesn't affect balance
     });
     return balA;
   }, [state.transactions]);
